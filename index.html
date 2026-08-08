@@ -169,6 +169,44 @@
   .skel-line{ height:14px; width:100%; }
   .error-text{ color:var(--danger); font-size:13px; font-family:'JetBrains Mono', monospace; }
 
+  /* ---------- ip lookup ---------- */
+  .lookup-panel{ margin-bottom:20px; }
+  .lookup-form{ display:flex; gap:10px; margin-bottom:4px; }
+  @media (max-width:560px){ .lookup-form{ flex-direction:column; } }
+  .lookup-input{
+    flex:1; min-width:0; background:var(--bg-elev-2); border:1px solid var(--border-soft); border-radius:11px;
+    padding:13px 16px; color:var(--text); font-family:'JetBrains Mono', monospace; font-size:14px;
+    outline:none; transition:border-color .15s ease;
+  }
+  .lookup-input::placeholder{ color:var(--text-faint); }
+  .lookup-input:focus{ border-color:var(--accent); }
+  .lookup-input.invalid{ border-color:var(--danger); }
+  .lookup-btn{
+    display:flex; align-items:center; justify-content:center; gap:8px;
+    background:var(--accent); color:#04140d; border:none; padding:0 22px; border-radius:11px;
+    font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:14px; cursor:pointer;
+    transition:transform .12s ease, opacity .15s ease; white-space:nowrap;
+  }
+  .lookup-btn:active{ transform:scale(0.97); }
+  .lookup-btn:disabled{ opacity:0.5; cursor:not-allowed; }
+  .lookup-btn svg{ width:15px; height:15px; }
+  .lookup-hint{ font-size:11.5px; color:var(--text-faint); margin-top:10px; font-family:'JetBrains Mono', monospace; }
+
+  .lookup-result{ margin-top:20px; padding-top:20px; border-top:1px solid var(--border-soft); }
+  .lookup-result-head{ display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:4px; }
+  .lookup-result-ip{ font-family:'JetBrains Mono', monospace; font-size:22px; font-weight:600; }
+  .lookup-result-loc{ font-size:13px; color:var(--text-dim); margin-bottom:16px; }
+  .lookup-result-loc b{ color:var(--text); font-weight:500; }
+  .lookup-clear{ font-size:11.5px; color:var(--text-faint); cursor:pointer; text-decoration:underline; font-family:'JetBrains Mono', monospace; }
+
+  .search-marker-dot{ width:14px; height:14px; border-radius:50%; background:#e8e9ec; border:3px solid #08090b; box-shadow:0 0 0 1px var(--border); }
+
+  .legend{ display:flex; gap:18px; margin-top:12px; font-size:11px; color:var(--text-faint); font-family:'JetBrains Mono', monospace; }
+  .legend span{ display:inline-flex; align-items:center; gap:6px; }
+  .legend i{ width:8px; height:8px; border-radius:50%; display:inline-block; }
+  .legend i.you{ background:var(--accent); }
+  .legend i.searched{ background:#e8e9ec; }
+
   /* ---------- speed test / GO gauge ---------- */
   .speed-panel{ padding:36px; display:flex; flex-direction:column; align-items:center; }
   .speed-head{ text-align:center; margin-bottom:8px; }
@@ -311,6 +349,27 @@
 
   </div>
 
+  <!-- IP LOOKUP -->
+  <div class="panel lookup-panel">
+    <div class="eyebrow">
+      <div class="eyebrow-label">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>
+        Look Up Any IP Address
+      </div>
+    </div>
+
+    <div class="lookup-form">
+      <input class="lookup-input" id="lookupInput" type="text" placeholder="Paste an IPv4 or IPv6 address, e.g. 68.47.138.44" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button class="lookup-btn" id="lookupBtn">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4.3-4.3"></path></svg>
+        <span id="lookupBtnLabel">Search</span>
+      </button>
+    </div>
+    <div class="lookup-hint" id="lookupHint">Works with any public IPv4 or IPv6 address — shown as a second pin on the map above.</div>
+
+    <div id="lookupResult"></div>
+  </div>
+
   <!-- SPEED TEST -->
   <div class="panel speed-panel">
     <div class="speed-head">
@@ -377,28 +436,55 @@
      MAP
   ========================================================= */
   let mapInstance = null;
-  let markerInstance = null;
+  let homeMarker = null;
+  let searchMarker = null;
 
-  function initMap(lat, lon, popupHtml){
-    if (lat == null || lon == null) return;
+  function ensureMap(lat, lon, zoom){
     if (!mapInstance){
-      mapInstance = L.map('map', { zoomControl: true, attributionControl: true }).setView([lat, lon], 10);
+      mapInstance = L.map('map', { zoomControl: true, attributionControl: true }).setView([lat, lon], zoom);
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap &copy; CARTO',
         maxZoom: 19,
         subdomains: 'abcd'
       }).addTo(mapInstance);
+    }
+    setTimeout(()=>mapInstance.invalidateSize(), 200);
+  }
+
+  function initMap(lat, lon, popupHtml){
+    if (lat == null || lon == null) return;
+    ensureMap(lat, lon, 10);
+    mapInstance.setView([lat, lon], 10);
+
+    const icon = L.divIcon({ className: '', html: '<div class="pulse-marker"></div>', iconSize: [16,16], iconAnchor: [8,8] });
+    if (homeMarker) mapInstance.removeLayer(homeMarker);
+    homeMarker = L.marker([lat, lon], { icon, zIndexOffset: 100 }).addTo(mapInstance);
+    if (popupHtml) homeMarker.bindPopup(popupHtml);
+  }
+
+  function plotSearchMarker(lat, lon, popupHtml){
+    if (lat == null || lon == null) return;
+    ensureMap(lat, lon, 10);
+
+    const icon = L.divIcon({ className: '', html: '<div class="search-marker-dot"></div>', iconSize: [14,14], iconAnchor: [7,7] });
+    if (searchMarker) mapInstance.removeLayer(searchMarker);
+    searchMarker = L.marker([lat, lon], { icon }).addTo(mapInstance);
+    if (popupHtml) searchMarker.bindPopup(popupHtml).openPopup();
+
+    if (homeMarker){
+      const bounds = L.latLngBounds([homeMarker.getLatLng(), [lat, lon]]);
+      mapInstance.fitBounds(bounds, { padding: [50, 50], maxZoom: 11 });
     } else {
       mapInstance.setView([lat, lon], 10);
     }
+  }
 
-    const icon = L.divIcon({ className: '', html: '<div class="pulse-marker"></div>', iconSize: [16,16], iconAnchor: [8,8] });
-
-    if (markerInstance) mapInstance.removeLayer(markerInstance);
-    markerInstance = L.marker([lat, lon], { icon }).addTo(mapInstance);
-    if (popupHtml) markerInstance.bindPopup(popupHtml);
-
-    setTimeout(()=>mapInstance.invalidateSize(), 200);
+  function clearSearchMarker(){
+    if (searchMarker){
+      mapInstance.removeLayer(searchMarker);
+      searchMarker = null;
+    }
+    if (homeMarker) mapInstance.setView(homeMarker.getLatLng(), 10);
   }
 
   /* =========================================================
