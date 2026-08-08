@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>NETSCOPE — IP & Speed</title>
+<title>IP Trace — Geolocation & Speed</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
@@ -17,9 +17,9 @@
     --text:#e8e9ec;
     --text-dim:#8b8f9a;
     --text-faint:#54575f;
-    --accent:#34d399;
-    --accent-dim:#1a5c47;
-    --accent-glow:rgba(52,211,153,0.14);
+    --accent:#22d3ee;
+    --accent-dim:#0e5866;
+    --accent-glow:rgba(34,211,238,0.16);
     --danger:#f2555a;
     --radius:18px;
   }
@@ -55,7 +55,7 @@
   .brand{ display:flex; align-items:center; gap:11px; }
   .brand-mark{
     width:34px; height:34px; border-radius:9px;
-    background:linear-gradient(155deg, var(--accent), #0d9166);
+    background:linear-gradient(155deg, var(--accent), #0e7490);
     display:flex; align-items:center; justify-content:center;
     box-shadow:0 0 0 1px rgba(255,255,255,0.08) inset, 0 8px 20px -6px var(--accent-glow);
     flex-shrink:0;
@@ -271,11 +271,11 @@
   <header>
     <div class="brand">
       <div class="brand-mark">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#04140d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2"></circle><path d="M12 2v4M12 18v4M2 12h4M18 12h4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M4.9 19.1l2.8-2.8M16.3 7.7l2.8-2.8"></path></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="#041219" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"></path><circle cx="12" cy="9.5" r="2.4"></circle></svg>
       </div>
       <div>
-        <div class="brand-name">NETSCOPE</div>
-        <div class="brand-sub">Network Diagnostics</div>
+        <div class="brand-name">IP TRACE</div>
+        <div class="brand-sub">Address Tracing &amp; Diagnostics</div>
       </div>
     </div>
     <div class="status-pill"><span class="dot"></span><span id="statusPillText">scanning connection</span></div>
@@ -596,6 +596,116 @@
     loadIps();
     loadGeoAndIsp();
   });
+
+  /* =========================================================
+     IP LOOKUP (search any address)
+  ========================================================= */
+  const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
+  const IPV6_RE = /^[0-9a-fA-F:]+:[0-9a-fA-F:]+$/;
+
+  function isValidIp(v){
+    if (IPV4_RE.test(v)) return v.split('.').every(p => Number(p) >= 0 && Number(p) <= 255);
+    return IPV6_RE.test(v);
+  }
+
+  async function lookupGeo(ip){
+    let data = await fetchJson(`https://ipapi.co/${ip}/json/`, 7000).catch(()=>null);
+    if (data && data.ip && !data.error){
+      return {
+        ip: data.ip, city: data.city, region: data.region, country: data.country_name, countryCode: data.country_code,
+        isp: data.org || 'Unknown ISP', asn: data.asn, timezone: data.timezone,
+        lat: data.latitude, lon: data.longitude
+      };
+    }
+    const alt = await fetchJson(`https://ipwho.is/${ip}`, 7000);
+    if (!alt || alt.success === false) throw new Error(alt && alt.message ? alt.message : 'lookup failed');
+    return {
+      ip: alt.ip, city: alt.city, region: alt.region, country: alt.country, countryCode: alt.country_code,
+      isp: (alt.connection && (alt.connection.isp || alt.connection.org)) || 'Unknown ISP',
+      asn: alt.connection ? alt.connection.asn : '—',
+      timezone: alt.timezone ? alt.timezone.id : '—',
+      lat: alt.latitude, lon: alt.longitude
+    };
+  }
+
+  function renderLookupResult(n){
+    const locParts = [n.city, n.region].filter(Boolean).join(', ');
+    $('lookupResult').innerHTML = `
+      <div class="lookup-result">
+        <div class="lookup-result-head">
+          <span>${flagEmoji(n.countryCode)}</span>
+          <span class="lookup-result-ip">${n.ip}</span>
+          <span class="lookup-clear" id="lookupClearBtn">clear pin</span>
+        </div>
+        <div class="lookup-result-loc">${locParts ? `<b>${locParts}</b>` : 'Location unknown'}${n.country ? ', ' + n.country : ''}</div>
+        <div class="kv-grid" style="display:grid; grid-template-columns:repeat(2,1fr); gap:1px; background:var(--border-soft); border:1px solid var(--border-soft); border-radius:12px; overflow:hidden;">
+          <div style="background:var(--bg-elev-2); padding:14px 16px;">
+            <div class="ip-badge-label">ISP / Org</div>
+            <div class="isp-row value" style="text-align:left; margin-top:4px;">${n.isp || '—'}</div>
+          </div>
+          <div style="background:var(--bg-elev-2); padding:14px 16px;">
+            <div class="ip-badge-label">ASN</div>
+            <div class="isp-row value" style="text-align:left; margin-top:4px;">${n.asn || '—'}</div>
+          </div>
+          <div style="background:var(--bg-elev-2); padding:14px 16px;">
+            <div class="ip-badge-label">Timezone</div>
+            <div class="isp-row value" style="text-align:left; margin-top:4px;">${n.timezone || '—'}</div>
+          </div>
+          <div style="background:var(--bg-elev-2); padding:14px 16px;">
+            <div class="ip-badge-label">Coordinates</div>
+            <div class="isp-row value" style="text-align:left; margin-top:4px;">${n.lat != null ? n.lat.toFixed(3) + ', ' + n.lon.toFixed(3) : '—'}</div>
+          </div>
+        </div>
+        <div class="legend">
+          <span><i class="you"></i>Your location</span>
+          <span><i class="searched"></i>Searched IP</span>
+        </div>
+      </div>
+    `;
+    $('lookupClearBtn').addEventListener('click', ()=>{
+      $('lookupResult').innerHTML = '';
+      $('lookupInput').value = '';
+      clearSearchMarker();
+    });
+  }
+
+  async function runLookup(){
+    const input = $('lookupInput');
+    const raw = input.value.trim();
+
+    if (!raw || !isValidIp(raw)){
+      input.classList.add('invalid');
+      $('lookupHint').textContent = 'That doesn\'t look like a valid IPv4 or IPv6 address.';
+      $('lookupHint').style.color = 'var(--danger)';
+      return;
+    }
+    input.classList.remove('invalid');
+    $('lookupHint').style.color = 'var(--text-faint)';
+    $('lookupHint').textContent = 'Works with any public IPv4 or IPv6 address — shown as a second pin on the map above.';
+
+    const btn = $('lookupBtn');
+    btn.disabled = true;
+    $('lookupBtnLabel').textContent = 'Searching…';
+    $('lookupResult').innerHTML = `<div class="lookup-result"><div class="skel skel-line" style="width:220px; height:24px; margin-bottom:10px;"></div><div class="skel skel-line" style="width:160px; height:12px;"></div></div>`;
+
+    try{
+      const n = await lookupGeo(raw);
+      renderLookupResult(n);
+      if (n.lat != null && n.lon != null){
+        plotSearchMarker(n.lat, n.lon, `Click for more details about<br><b>${n.ip}</b>`);
+      }
+      window.scrollTo({ top: document.getElementById('map').getBoundingClientRect().top + window.scrollY - 90, behavior: 'smooth' });
+    }catch(err){
+      $('lookupResult').innerHTML = `<div class="lookup-result"><div class="error-text">Couldn't locate that address. It may be private, reserved, or invalid.</div></div>`;
+    }finally{
+      btn.disabled = false;
+      $('lookupBtnLabel').textContent = 'Search';
+    }
+  }
+
+  $('lookupBtn').addEventListener('click', runLookup);
+  $('lookupInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') runLookup(); });
+  $('lookupInput').addEventListener('input', () => $('lookupInput').classList.remove('invalid'));
 
   /* =========================================================
      LOCAL IP (WebRTC)
